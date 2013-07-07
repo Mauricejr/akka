@@ -124,16 +124,26 @@ private[cluster] final class ClusterHeartbeatSender extends Actor with ActorLogg
     context.actorSelection(self.path.toStringWithAddress(address))
 
   def receive = {
-    case HeartbeatTick                ⇒ heartbeat()
-    case MemberUp(m)                  ⇒ addMember(m)
-    case UnreachableMember(m)         ⇒ removeMember(m)
-    case MemberRemoved(m, _)          ⇒ removeMember(m)
-    case s: CurrentClusterState       ⇒ reset(s)
-    case MemberExited(m)              ⇒ memberExited(m)
-    case _: MemberEvent               ⇒ // not interested in other types of MemberEvent
-    case HeartbeatRequest(from)       ⇒ addHeartbeatRequest(from)
-    case SendHeartbeatRequest(to)     ⇒ sendHeartbeatRequest(to)
-    case ExpectedFirstHeartbeat(from) ⇒ triggerFirstHeartbeat(from)
+    case x ⇒
+      val t0 = System.nanoTime
+      try {
+        x match {
+          case HeartbeatTick                ⇒ heartbeat()
+          case MemberUp(m)                  ⇒ addMember(m)
+          case UnreachableMember(m)         ⇒ removeMember(m)
+          case MemberRemoved(m, _)          ⇒ removeMember(m)
+          case s: CurrentClusterState       ⇒ reset(s)
+          case MemberExited(m)              ⇒ memberExited(m)
+          case _: MemberEvent               ⇒ // not interested in other types of MemberEvent
+          case HeartbeatRequest(from)       ⇒ addHeartbeatRequest(from)
+          case SendHeartbeatRequest(to)     ⇒ sendHeartbeatRequest(to)
+          case ExpectedFirstHeartbeat(from) ⇒ triggerFirstHeartbeat(from)
+        }
+      } finally {
+        val d = (System.nanoTime - t0) / 1000000
+        if (d > 100)
+          log.info("# HearbeatSender msg [{}] took [{}] ms", x.getClass.getSimpleName, d)
+      }
   }
 
   def reset(snapshot: CurrentClusterState): Unit =
@@ -195,10 +205,14 @@ private[cluster] final class ClusterHeartbeatSender extends Actor with ActorLogg
     }
 
     // request heartbeats from expected sender node if no heartbeat messages has been received
+    val t0 = System.nanoTime
     state.ring.mySenders foreach { address ⇒
       if (!cluster.failureDetector.isMonitoring(address))
         scheduler.scheduleOnce(HeartbeatRequestDelay, self, SendHeartbeatRequest(address))
     }
+    val d = (System.nanoTime - t0) / 1000000
+    if (d > 100)
+      log.info("# mySenders took [{}] ms", d)
 
   }
 
